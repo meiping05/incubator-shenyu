@@ -18,6 +18,7 @@
 package org.apache.shenyu.plugin.grpc;
 
 import io.grpc.CallOptions;
+import io.grpc.Context;
 import io.grpc.MethodDescriptor;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.shenyu.common.constant.Constants;
@@ -44,7 +45,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
+import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -53,13 +56,14 @@ import java.util.concurrent.TimeUnit;
  */
 public class GrpcPlugin extends AbstractShenyuPlugin {
 
+    public static final Context.Key<Map<String, String>> RPC_CONTEXT_KEY = Context.key("shenyuRpcContext");
+
     private static final Logger LOG = LoggerFactory.getLogger(GrpcPlugin.class);
 
     @Override
     protected Mono<Void> doExecute(final ServerWebExchange exchange, final ShenyuPluginChain chain, final SelectorData selector, final RuleData rule) {
         final String param = exchange.getAttribute(Constants.PARAM_TRANSFORM);
         ShenyuContext shenyuContext = exchange.getAttribute(Constants.CONTEXT);
-
         assert shenyuContext != null;
         MetaData metaData = exchange.getAttribute(Constants.META_DATA);
 
@@ -85,7 +89,11 @@ public class GrpcPlugin extends AbstractShenyuPlugin {
 
         GrpcExtInfo extInfo = GsonUtils.getGson().fromJson(metaData.getRpcExt(), GrpcExtInfo.class);
         CallOptions callOptions = CallOptions.DEFAULT.withDeadlineAfter(extInfo.timeout, TimeUnit.MILLISECONDS);
+        Map<String, Map<String, String>> rpcContext = exchange.getAttribute(Constants.GENERAL_CONTEXT);
+        Optional.ofNullable(rpcContext).map(context -> context.get(PluginEnum.GRPC.getName())).ifPresent(
+            context -> Context.current().withValue(RPC_CONTEXT_KEY, context).attach());
         CompletableFuture<ShenyuGrpcResponse> result = client.call(metaData, callOptions, param, extInfo.methodType);
+        Context.current().detach(Context.ROOT);
 
         return Mono.fromFuture(result.thenApply(ret -> {
             exchange.getAttributes().put(Constants.RPC_RESULT, ret.getResults());
